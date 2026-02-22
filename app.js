@@ -91,9 +91,23 @@ function init(){
 }
 
 function issueNewUrl(kind){
-  // Links to “New issue” selecting a template (works if templates exist)
-  const base = `https://github.com/${cfg.repoOwner}/${cfg.repoName}/issues/new/choose`;
-  return base;
+  const base = `https://github.com/${cfg.repoOwner}/${cfg.repoName}/issues/new`;
+
+  if (kind === "inventory"){
+    // IMPORTANT: filename must match your actual template file name
+    const template = "inventory.yml";
+    const title = encodeURIComponent("[INV] <Design House> - <Name>");
+    const labels = encodeURIComponent(`${cfg.inventoryLabel},In Stock`);
+    return `${base}?template=${encodeURIComponent(template)}&title=${title}&labels=${labels}`;
+  }
+
+  // shopping
+  {
+    const template = "shopping.yml";
+    const title = encodeURIComponent("[SHOP] <Design House> - <Name>");
+    const labels = encodeURIComponent(`${cfg.shoppingLabel},Looking For`);
+    return `${base}?template=${encodeURIComponent(template)}&title=${title}&labels=${labels}`;
+  }
 }
 
 function openSettings(){
@@ -600,4 +614,5 @@ function escapeHtml(s){
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#039;");
 }
+
 function escapeAttr(s){ return escapeHtml(s).replaceAll("`","&#096;"); }
