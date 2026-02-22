@@ -1,6 +1,6 @@
 name: Add to Inventory
 description: Add a fragrance to your inventory
-title: "[INV] <Design House> - <Name>"
+title: "[INV] {{design_house}} - {{fragrance_name}} ({{type}} {{ml}}mL)"
 labels: ["list:inventory", "In Stock"]
 body:
   - type: input
