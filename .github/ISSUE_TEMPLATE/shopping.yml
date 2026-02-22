@@ -1,0 +1,70 @@
+name: Add to Shopping List
+description: Add a fragrance you want to buy
+title: "[SHOP] <Design House> - <Name>"
+labels: ["list:shopping", "Looking For"]
+body:
+  - type: input
+    id: design_house
+    attributes:
+      label: Design House
+      placeholder: Lattafa, Dior, Armaf...
+    validations:
+      required: true
+
+  - type: input
+    id: fragrance_name
+    attributes:
+      label: Fragrance Name
+      placeholder: Khamrah Qahwa, Sauvage...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - EDP
+        - EDT
+        - Parfum / Extrait
+        - Cologne
+        - EDC
+        - Oil
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: ml
+    attributes:
+      label: Size (mL)
+      placeholder: "100"
+      description: Numbers only (e.g., 100)
+    validations:
+      required: true
+
+  - type: input
+    id: desired_buy
+    attributes:
+      label: Desired Purchase Price (USD)
+      placeholder: "25"
+      description: Numbers only (e.g., 25)
+    validations:
+      required: true
+
+  - type: input
+    id: source_link
+    attributes:
+      label: Source Link (optional)
+      placeholder: https://...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: status
+    attributes:
+      label: Status Label (pick one in labels after submit)
+      description: Shopping status is controlled by labels (Looking For / In Transit / On Hold).
+      options:
+        - label: "I understand status is controlled by labels."
+          required: true
