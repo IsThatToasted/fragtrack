@@ -1,6 +1,6 @@
 name: Add to Shopping List
 description: Add a fragrance you want to buy
-title: "[SHOP] <Design House> - <Name>"
+title: "[SHOP] {{design_house}} - {{fragrance_name}} ({{type}} {{ml}}mL)"
 labels: ["list:shopping", "Looking For"]
 body:
   - type: input
