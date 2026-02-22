@@ -1,0 +1,79 @@
+name: Add to Inventory
+description: Add a fragrance to your inventory
+title: "[INV] <Design House> - <Name>"
+labels: ["list:inventory", "In Stock"]
+body:
+  - type: input
+    id: design_house
+    attributes:
+      label: Design House
+      placeholder: Lattafa, Dior, Armaf...
+    validations:
+      required: true
+
+  - type: input
+    id: fragrance_name
+    attributes:
+      label: Fragrance Name
+      placeholder: Khamrah Qahwa, Sauvage...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - EDP
+        - EDT
+        - Parfum / Extrait
+        - Cologne
+        - EDC
+        - Oil
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: ml
+    attributes:
+      label: Size (mL)
+      placeholder: "100"
+      description: Numbers only (e.g., 100)
+    validations:
+      required: true
+
+  - type: input
+    id: price_paid
+    attributes:
+      label: Price Paid (USD)
+      placeholder: "29.99"
+      description: Numbers only (e.g., 29.99)
+    validations:
+      required: true
+
+  - type: input
+    id: desired_sell
+    attributes:
+      label: Desired Sell Price (USD)
+      placeholder: "45"
+      description: Numbers only (e.g., 45)
+    validations:
+      required: true
+
+  - type: input
+    id: source_link
+    attributes:
+      label: Source Link (optional)
+      placeholder: https://whatnot.com/...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: status
+    attributes:
+      label: Status Label (pick one in labels after submit)
+      description: After submitting, you can adjust status by editing issue labels (In Stock / In Transit / Looking For / Sold).
+      options:
+        - label: "I understand status is controlled by labels."
+          required: true

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fragrance Inventory + Shopping Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🧴</div>
+      <div>
+        <div class="title">Fragrance Inventory + Shopping</div>
+        <div class="subtitle" id="repoLine">Loading…</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn ghost" id="refreshBtn">Refresh</button>
+      <button class="btn" id="settingsBtn">Settings</button>
+      <a class="btn accent" id="addInventoryBtn" href="#" target="_blank" rel="noreferrer">Add Inventory</a>
+      <a class="btn accent2" id="addShoppingBtn" href="#" target="_blank" rel="noreferrer">Add Shopping</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <div class="panelHead">
+        <div class="tabs" role="tablist">
+          <button class="tab active" id="tabInventory" data-tab="inventory">Inventory</button>
+          <button class="tab" id="tabShopping" data-tab="shopping">Shopping List</button>
+        </div>
+
+        <div class="searchRow">
+          <input id="searchInput" class="search" placeholder="Search design house, name, type, labels…" />
+          <select id="statusFilter" class="select">
+            <option value="__ALL__">All Status</option>
+          </select>
+          <select id="sortSelect" class="select">
+            <option value="updated_desc">Sort: Recently updated</option>
+            <option value="house_asc">Sort: House A→Z</option>
+            <option value="name_asc">Sort: Name A→Z</option>
+            <option value="ppm_asc">Sort: $/mL (low→high)</option>
+            <option value="ppm_desc">Sort: $/mL (high→low)</option>
+          </select>
+        </div>
+
+        <div class="stats" id="statsRow"></div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="cardHead">
+            <div class="cardTitle" id="listTitle">Inventory Items</div>
+            <div class="pillRow">
+              <span class="pill" id="countPill">0</span>
+              <button class="btn ghost sm" id="toggleViewBtn">Table View</button>
+            </div>
+          </div>
+
+          <div id="listContainer"></div>
+        </section>
+
+        <section class="card">
+          <div class="cardHead">
+            <div class="cardTitle">Groups</div>
+            <div class="muted">By Design House + quick totals</div>
+          </div>
+          <div id="groupsContainer" class="groups"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings modal -->
+  <div class="modalBackdrop hidden" id="modalBackdrop"></div>
+  <div class="modal hidden" id="settingsModal" role="dialog" aria-modal="true">
+    <div class="modalHead">
+      <div>
+        <div class="modalTitle">Settings</div>
+        <div class="muted">Optional GitHub token to avoid API rate limits</div>
+      </div>
+      <button class="btn ghost" id="closeSettingsBtn">Close</button>
+    </div>
+
+    <div class="modalBody">
+      <label class="label">GitHub Personal Access Token (optional)</label>
+      <input id="tokenInput" class="input" placeholder="ghp_..." />
+      <div class="help">
+        Token is stored in <code>localStorage</code> only (your browser). Needs <b>no scopes</b> to read public issues.
+      </div>
+
+      <div class="row">
+        <button class="btn" id="saveTokenBtn">Save Token</button>
+        <button class="btn ghost" id="clearTokenBtn">Clear</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="muted">
+        Tip: status + moving between lists is controlled by <b>labels</b> on issues.
+        Later, we can add an authenticated “Move to Inventory” button that edits labels automatically.
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
