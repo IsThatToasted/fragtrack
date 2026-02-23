@@ -198,6 +198,9 @@ function normalizeIssue(issue){
   const pricePerMl = (ml && pricePaid) ? (pricePaid / ml) : null;
   const desiredPerMl = (ml && (desiredSell || desiredBuy)) ? ((desiredSell || desiredBuy) / ml) : null;
 
+  // NEW: 10mL sample target price (based on desired per mL)
+  const sample10Price = (desiredPerMl && Number.isFinite(desiredPerMl)) ? (desiredPerMl * 10) : null;
+
   return {
     id: issue.id,
     number: issue.number,
@@ -223,6 +226,7 @@ function normalizeIssue(issue){
     status,
     pricePerMl,
     desiredPerMl,
+    sample10Price, // NEW
   };
 }
 
@@ -367,6 +371,11 @@ function money(n){
 function money4(n){
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return `$${n.toFixed(4)}`;
+}
+// NEW: for the 10mL sample price (keep it 2 decimals)
+function money2(n){
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return `$${n.toFixed(2)}`;
 }
 
 function render(){
@@ -522,13 +531,20 @@ function renderCards(items){
             <div class="k">${isInv ? "Price Paid" : "Desired Buy"}</div>
             <div class="v">${money(primaryMoney)}</div>
           </div>
+
           <div class="box">
-            <div class="k">${isInv ? "Desired Sell" : "Desired $/mL"}</div>
-            <div class="v">${isInv ? money(it.desiredSell) : money4(it.desiredPerMl)}</div>
+            <div class="k">${isInv ? "Desired Sell" : "Desired Buy"}</div>
+            <div class="v">${money(desiredMoney)}</div>
           </div>
+
           <div class="box">
             <div class="k">${isInv ? "Paid $/mL" : "Desired Buy $/mL"}</div>
-            <div class="v">${money4(it.pricePerMl ?? it.desiredPerMl)}</div>
+            <div class="v">${money4(isInv ? it.pricePerMl : it.desiredPerMl)}</div>
+          </div>
+
+          <div class="box">
+            <div class="k">Target (10mL sample)</div>
+            <div class="v">${money2(it.sample10Price)}</div>
           </div>
         </div>
       </div>
@@ -554,6 +570,7 @@ function renderTable(items){
       <td>${money(isInv ? it.desiredSell : it.desiredBuy)}</td>
       <td>${money4(isInv ? it.pricePerMl : it.desiredPerMl)}</td>
       <td>${money4(it.desiredPerMl)}</td>
+      <td>${money2(it.sample10Price)}</td>
       <td>
         ${it.sourceLink ? `<a href="${escapeAttr(it.sourceLink)}" target="_blank" rel="noreferrer">Source</a>` : "—"}
         &nbsp;|&nbsp;
@@ -576,6 +593,7 @@ function renderTable(items){
             <th>${isInv ? "Desired Sell" : "Desired Buy"}</th>
             <th>${isInv ? "Paid $/mL" : "Desired $/mL"}</th>
             <th>Desired $/mL</th>
+            <th>10mL Target</th>
             <th>Links</th>
           </tr>
         </thead>
