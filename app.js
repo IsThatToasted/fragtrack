@@ -36,6 +36,11 @@ const state = {
   filtered: [],
 };
 
+// Cache + ETag (prevents blank UI + reduces API calls)
+const CACHE_KEY = "fi_cache_v1";
+const ETAG_KEY  = "fi_etag_v1";
+const CACHE_TTL_MS = 1000 * 60 * 10; // 10 minutes
+
 init();
 
 function init(){
@@ -124,40 +129,146 @@ function apiBase(){
   return `https://api.github.com/repos/${cfg.repoOwner}/${cfg.repoName}`;
 }
 
-async function ghFetch(url){
+// --- Cache helpers ---
+function saveCache(issues){
+  const payload = { ts: Date.now(), issues };
+  localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+}
+function loadCache(){
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload?.ts || !Array.isArray(payload.issues)) return null;
+    return payload;
+  }catch{
+    return null;
+  }
+}
+function isCacheFresh(payload){
+  return payload && (Date.now() - payload.ts) < CACHE_TTL_MS;
+}
+
+function buildRateLimitMessage(remaining, resetEpoch){
+  let msg = "GitHub API rate limit hit.";
+  if (remaining !== null && remaining !== undefined) msg += ` Remaining: ${remaining}.`;
+  if (resetEpoch){
+    const ms = Number(resetEpoch) * 1000;
+    if (Number.isFinite(ms)){
+      const mins = Math.max(1, Math.ceil((ms - Date.now()) / 60000));
+      msg += ` Try again in about ${mins} minute${mins === 1 ? "" : "s"}.`;
+    }
+  }
+  msg += " Add a GitHub token in Settings to prevent this.";
+  return msg;
+}
+
+// upgraded fetch: handles rate limit + supports ETag / 304
+async function ghFetch(url, { useEtag = false } = {}){
   const headers = { "Accept": "application/vnd.github+json" };
   const tok = getToken();
   if (tok) headers.Authorization = `token ${tok}`;
+
+  if (useEtag){
+    const et = localStorage.getItem(ETAG_KEY);
+    if (et) headers["If-None-Match"] = et;
+  }
+
   const res = await fetch(url, { headers });
+
+  // Rate limit / forbidden / too many requests
+  if (res.status === 403 || res.status === 429){
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const reset = res.headers.get("x-ratelimit-reset");
+    const msg = buildRateLimitMessage(remaining, reset);
+    const err = new Error(msg);
+    err.__rateLimited = true;
+    throw err;
+  }
+
+  if (res.status === 304){
+    return { __notModified: true };
+  }
+
   if (!res.ok){
     const txt = await res.text().catch(()=> "");
     throw new Error(`GitHub API error ${res.status}: ${txt || res.statusText}`);
   }
+
+  const etag = res.headers.get("etag");
+  if (useEtag && etag) localStorage.setItem(ETAG_KEY, etag);
+
   return res.json();
 }
 
 async function loadAll(){
-  // pull issues (open + closed) so you can mark Sold/Closed later if you want
-  // we’ll fetch multiple pages
   try{
     els.refreshBtn.textContent = "Refreshing…";
+
+    // If we have fresh cache and nothing loaded yet, render instantly
+    const cached = loadCache();
+    if (cached && isCacheFresh(cached) && state.allIssues.length === 0){
+      state.allIssues = cached.issues.map(normalizeIssue);
+      applyFilters(); // renders
+    }
+
     const perPage = 100;
     let page = 1;
     let all = [];
+
+    // First page with ETag to avoid unnecessary hits
+    const firstUrl = `${apiBase()}/issues?state=all&per_page=${perPage}&page=1`;
+    const first = await ghFetch(firstUrl, { useEtag: true });
+
+    if (first && first.__notModified){
+      const c = loadCache();
+      if (c && c.issues){
+        state.allIssues = c.issues.map(normalizeIssue);
+        applyFilters();
+        return;
+      }
+      // no cache; do a normal fetch
+      const retry = await ghFetch(firstUrl, { useEtag: false });
+      all = all.concat(retry.filter(x => !x.pull_request));
+      page = 2;
+    } else {
+      all = all.concat(first.filter(x => !x.pull_request));
+      page = 2;
+    }
+
+    // Remaining pages
     while (true){
       const url = `${apiBase()}/issues?state=all&per_page=${perPage}&page=${page}`;
       const chunk = await ghFetch(url);
-      // Filter out PRs
       const issuesOnly = chunk.filter(x => !x.pull_request);
       all = all.concat(issuesOnly);
+
       if (chunk.length < perPage) break;
       page++;
       if (page > 10) break; // safety cap
     }
 
+    // cache raw issues
+    saveCache(all);
+
     state.allIssues = all.map(normalizeIssue);
     applyFilters();
   }catch(err){
+    // fallback to cache
+    const cached = loadCache();
+    if (cached && cached.issues){
+      state.allIssues = cached.issues.map(normalizeIssue);
+      applyFilters();
+      // show warning banner, but keep data visible
+      try{
+        els.listContainer.insertAdjacentHTML("afterbegin", renderBanner(err.message));
+      }catch{
+        // ignore if container not ready
+      }
+      return;
+    }
+
+    // no cache -> show full error
     els.listContainer.innerHTML = renderError(err.message);
     els.groupsContainer.innerHTML = "";
     els.statsRow.innerHTML = "";
@@ -165,6 +276,15 @@ async function loadAll(){
   }finally{
     els.refreshBtn.textContent = "Refresh";
   }
+}
+
+function renderBanner(msg){
+  return `
+    <div class="item" style="margin:12px; border-color: rgba(255,204,102,.55);">
+      <div class="itemName">Using last saved data</div>
+      <div class="itemSub">${escapeHtml(msg)}</div>
+    </div>
+  `;
 }
 
 function normalizeIssue(issue){
@@ -195,7 +315,7 @@ function normalizeIssue(issue){
   const pricePerMl = (ml && pricePaid) ? (pricePaid / ml) : null;
   const desiredPerMl = (ml && (desiredSell || desiredBuy)) ? ((desiredSell || desiredBuy) / ml) : null;
 
-  // NEW: 10mL sample target price (based on desired per mL)
+  // 10mL sample target price (based on desired per mL)
   const sample10Price = (desiredPerMl && Number.isFinite(desiredPerMl)) ? (desiredPerMl * 10) : null;
 
   return {
@@ -223,7 +343,7 @@ function normalizeIssue(issue){
     status,
     pricePerMl,
     desiredPerMl,
-    sample10Price, // NEW
+    sample10Price,
   };
 }
 
@@ -252,11 +372,9 @@ function inferFromTitle(title){
 }
 
 function parseIssueBody(body){
-  // Issue forms render as markdown bullets like:
+  // Issue forms render as markdown headings:
   // ### Design House
   // Dior
-  //
-  // We'll parse by heading blocks:
   const fields = ["design_house","fragrance_name","type","ml","price_paid","desired_sell","desired_buy","source_link"];
   const map = {};
   for (const f of fields){
@@ -282,16 +400,11 @@ function toHeadingLabel(field){
 }
 
 function readHeadingValue(markdown, headingText){
-  // Finds:
-  // ### HeadingText
-  // value (until next ###)
   const re = new RegExp(`^###\\s+${escapeRegExp(headingText)}\\s*\\n([\\s\\S]*?)(?=\\n###\\s+|$)`, "m");
   const m = markdown.match(re);
   if (!m) return "";
-  // clean typical issue form artifacts
   let v = (m[1] || "").trim();
   v = v.replace(/\r/g,"");
-  // remove checkbox line if user didn’t edit
   v = v.replace(/^_No response_$/i,"").trim();
   return v;
 }
@@ -369,7 +482,6 @@ function money4(n){
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return `$${n.toFixed(4)}`;
 }
-// NEW: for the 10mL sample price (keep it 2 decimals)
 function money2(n){
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return `$${n.toFixed(2)}`;
@@ -610,7 +722,6 @@ function badgeForStatus(status){
 }
 
 function badgeForLabel(label){
-  // keep it neutral; status has its own style
   if (cfg.statusLabels.includes(label)) return "";
   return `<span class="badge">${escapeHtml(label)}</span>`;
 }
@@ -631,4 +742,3 @@ function escapeHtml(s){
 }
 
 function escapeAttr(s){ return escapeHtml(s).replaceAll("`","&#096;"); }
-
