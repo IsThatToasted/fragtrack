@@ -34,12 +34,19 @@ const state = {
   viewMode: "cards",      // cards | table
   allIssues: [],
   filtered: [],
+
+  // NEW: house focus filter + expand state (for grouped view)
+  houseFilter: "",                  // exact design house match
+  expandedHouses: new Set(),         // set of house keys expanded
 };
 
 // Cache + ETag (prevents blank UI + reduces API calls)
 const CACHE_KEY = "fi_cache_v1";
 const ETAG_KEY  = "fi_etag_v1";
 const CACHE_TTL_MS = 1000 * 60 * 10; // 10 minutes
+
+// how many items per house to show before "Show more"
+const HOUSE_PREVIEW_COUNT = Number.isFinite(cfg.housePreviewCount) ? cfg.housePreviewCount : 4;
 
 init();
 
@@ -64,7 +71,11 @@ function init(){
   els.tabInventory.addEventListener("click", () => setTab("inventory"));
   els.tabShopping.addEventListener("click", () => setTab("shopping"));
 
-  els.searchInput.addEventListener("input", applyFilters);
+  els.searchInput.addEventListener("input", () => {
+    // If user starts typing, clear houseFilter so it behaves like normal search
+    if ((els.searchInput.value || "").trim()) state.houseFilter = "";
+    applyFilters();
+  });
   els.statusFilter.addEventListener("change", applyFilters);
   els.sortSelect.addEventListener("change", applyFilters);
 
@@ -90,6 +101,43 @@ function init(){
     els.tokenInput.value = "";
     closeSettings();
     loadAll();
+  });
+
+  // NEW: click-to-filter from right-side groups list
+  els.groupsContainer.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-house]");
+    if (!el) return;
+    const house = el.getAttribute("data-house") || "";
+    if (!house) return;
+
+    // Toggle behavior: clicking same house clears filter
+    if (state.houseFilter === house){
+      setHouseFilter("");
+    } else {
+      setHouseFilter(house);
+    }
+  });
+
+  // NEW: grouped list expand/collapse + "clear filter" handler (event delegation)
+  els.listContainer.addEventListener("click", (e) => {
+    // expand/collapse
+    const toggle = e.target.closest("[data-toggle-house]");
+    if (toggle){
+      const house = toggle.getAttribute("data-toggle-house") || "";
+      if (house){
+        if (state.expandedHouses.has(house)) state.expandedHouses.delete(house);
+        else state.expandedHouses.add(house);
+        render(); // rerender cards/table
+      }
+      return;
+    }
+
+    // clear filter chip
+    const clear = e.target.closest("[data-clear-house-filter]");
+    if (clear){
+      setHouseFilter("");
+      return;
+    }
   });
 
   loadAll();
@@ -259,12 +307,9 @@ async function loadAll(){
     if (cached && cached.issues){
       state.allIssues = cached.issues.map(normalizeIssue);
       applyFilters();
-      // show warning banner, but keep data visible
       try{
         els.listContainer.insertAdjacentHTML("afterbegin", renderBanner(err.message));
-      }catch{
-        // ignore if container not ready
-      }
+      }catch{}
       return;
     }
 
@@ -294,8 +339,6 @@ function normalizeIssue(issue){
   const isShopping  = labels.includes(cfg.shoppingLabel);
 
   const parsed = parseIssueBody(issue.body || "");
-
-  // prefer parsed fields; if missing, try to infer from title pattern
   const inferred = inferFromTitle(issue.title || "");
 
   const designHouse = parsed.design_house || inferred.design_house || "";
@@ -348,21 +391,15 @@ function normalizeIssue(issue){
 }
 
 function inferFromTitle(title){
-  // patterns like:
-  // [INV] Dior - Sauvage (EDP) 100ml
-  // Dior - Sauvage 100ml
   const out = {};
   const t = title.replace(/^\[[^\]]+\]\s*/,"").trim();
 
-  // extract ml
   const mlMatch = t.match(/(\d+(?:\.\d+)?)\s*(ml|mL)\b/);
   if (mlMatch) out.ml = mlMatch[1];
 
-  // extract type (EDP/EDT/Parfum/etc)
   const typeMatch = t.match(/\b(EDP|EDT|Parfum|Extrait|EDC|Cologne)\b/i);
   if (typeMatch) out.type = typeMatch[1].toUpperCase();
 
-  // house - name split
   const parts = t.split(" - ");
   if (parts.length >= 2){
     out.design_house = parts[0].trim();
@@ -372,9 +409,6 @@ function inferFromTitle(title){
 }
 
 function parseIssueBody(body){
-  // Issue forms render as markdown headings:
-  // ### Design House
-  // Dior
   const fields = ["design_house","fragrance_name","type","ml","price_paid","desired_sell","desired_buy","source_link"];
   const map = {};
   for (const f of fields){
@@ -424,7 +458,24 @@ function setTab(tab){
   els.tabInventory.classList.toggle("active", tab === "inventory");
   els.tabShopping.classList.toggle("active", tab === "shopping");
   els.listTitle.textContent = (tab === "inventory") ? "Inventory Items" : "Shopping List";
+
+  // optional: clear house filter when switching tabs, feels cleaner
+  state.houseFilter = "";
   applyFilters();
+}
+
+function setHouseFilter(house){
+  state.houseFilter = (house || "").trim();
+
+  // show a small "focused" feeling: clear search box when focusing a house
+  if (state.houseFilter){
+    els.searchInput.value = "";
+  }
+
+  applyFilters();
+
+  // small UX: scroll list into view
+  try{ els.listContainer.scrollIntoView({ behavior: "smooth", block: "start" }); }catch{}
 }
 
 function applyFilters(){
@@ -433,6 +484,11 @@ function applyFilters(){
   const sort = els.sortSelect.value;
 
   let items = state.allIssues.filter(it => state.activeTab === "inventory" ? it.isInventory : it.isShopping);
+
+  // NEW: exact house focus filter
+  if (state.houseFilter){
+    items = items.filter(it => (it.designHouse || "Unknown") === state.houseFilter);
+  }
 
   if (status && status !== "__ALL__"){
     items = items.filter(it => it.labels.includes(status));
@@ -493,10 +549,27 @@ function render(){
   renderStats();
   renderGroups();
 
+  // NEW: show house focus chip if active
+  const focusChip = state.houseFilter
+    ? `
+      <div class="item" style="margin:12px;">
+        <div class="itemTop" style="align-items:center;">
+          <div>
+            <div class="itemName">Focused: ${escapeHtml(state.houseFilter)}</div>
+            <div class="itemSub">Click the house on the right again, or clear this focus to see everything.</div>
+          </div>
+          <div class="badges">
+            <button class="badge" data-clear-house-filter style="cursor:pointer;">Clear</button>
+          </div>
+        </div>
+      </div>
+    `
+    : "";
+
   if (state.viewMode === "cards"){
-    els.listContainer.innerHTML = renderCards(state.filtered);
+    els.listContainer.innerHTML = focusChip + renderCards(state.filtered);
   } else {
-    els.listContainer.innerHTML = renderTable(state.filtered);
+    els.listContainer.innerHTML = focusChip + renderTable(state.filtered);
   }
 }
 
@@ -561,8 +634,33 @@ function statBox(k,v){
 }
 
 function renderGroups(){
+  // Build groups from *current filtered list before grouping UI*:
+  // We actually want the right-side “house summary” to represent the current tab + status/search,
+  // but NOT the houseFilter itself (otherwise it collapses to one item when focused).
+  // So we compute from tab-filtered items but ignore state.houseFilter.
+  const q = (els.searchInput.value || "").trim().toLowerCase();
+  const status = els.statusFilter.value;
+
+  let items = state.allIssues.filter(it => state.activeTab === "inventory" ? it.isInventory : it.isShopping);
+
+  if (status && status !== "__ALL__"){
+    items = items.filter(it => it.labels.includes(status));
+  }
+
+  if (q){
+    items = items.filter(it => {
+      const hay = [
+        it.designHouse, it.fragranceName, it.type,
+        String(it.ml ?? ""),
+        (it.labels || []).join(" "),
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  // group by house
   const groups = new Map();
-  for (const it of state.filtered){
+  for (const it of items){
     const key = it.designHouse || "Unknown";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(it);
@@ -584,8 +682,10 @@ function renderGroups(){
       desired ? `Desired ${money(desired)}` : null,
     ].filter(Boolean).join(" • ");
 
+    const active = (state.houseFilter === house) ? " active" : "";
+
     return `
-      <div class="group">
+      <div class="group${active}" data-house="${escapeAttr(house)}" style="cursor:pointer;">
         <div class="groupTop">
           <div>
             <div class="groupName">${escapeHtml(house)}</div>
@@ -603,64 +703,120 @@ function renderGroups(){
 function renderCards(items){
   if (!items.length) return `<div class="list"><div class="muted">No matches.</div></div>`;
 
-  const html = items.map(it => {
-    const isInv = state.activeTab === "inventory";
-    const primaryMoney = isInv ? it.pricePaid : it.desiredBuy;
-    const desiredMoney = isInv ? it.desiredSell : it.desiredBuy;
+  // NEW: group cards by house to avoid giant messy list
+  const groups = new Map();
+  for (const it of items){
+    const key = it.designHouse || "Unknown";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
 
-    const badges = (it.labels || [])
-      .filter(l => l !== cfg.inventoryLabel && l !== cfg.shoppingLabel)
-      .slice(0, 8)
-      .map(l => badgeForLabel(l))
-      .join("");
+  const houses = Array.from(groups.keys()).sort((a,b)=>a.localeCompare(b));
 
-    const link = it.sourceLink
-      ? `<a class="badge" href="${escapeAttr(it.sourceLink)}" target="_blank" rel="noreferrer">Source</a>`
+  const sections = houses.map(house => {
+    const arr = groups.get(house) || [];
+    const expanded = state.expandedHouses.has(house);
+    const visibleCount = expanded ? arr.length : Math.min(HOUSE_PREVIEW_COUNT, arr.length);
+    const hiddenCount = Math.max(0, arr.length - visibleCount);
+
+    // section meta
+    const ml = sum(arr.map(x => x.ml).filter(Boolean));
+    const paid = sum(arr.map(x => x.pricePaid).filter(Boolean));
+    const desired = sum(arr.map(x => (state.activeTab==="inventory" ? x.desiredSell : x.desiredBuy)).filter(Boolean));
+
+    const meta = [
+      `${arr.length} item${arr.length===1?"":"s"}`,
+      ml ? `${ml.toFixed(0)} mL` : null,
+      state.activeTab==="inventory" ? (paid ? `Paid ${money(paid)}` : null) : null,
+      desired ? `Desired ${money(desired)}` : null,
+    ].filter(Boolean).join(" • ");
+
+    const toggleText = expanded
+      ? `Show less`
+      : (hiddenCount > 0 ? `Show ${hiddenCount} more` : "");
+
+    const toggleBtn = (hiddenCount > 0 || expanded)
+      ? `<button class="badge" data-toggle-house="${escapeAttr(house)}" style="cursor:pointer;">${escapeHtml(toggleText)}</button>`
       : "";
 
-    const issueLink = `<a class="badge" href="${escapeAttr(it.url)}" target="_blank" rel="noreferrer">Issue #${it.number}</a>`;
+    const innerCards = arr.slice(0, visibleCount).map(it => renderSingleCard(it)).join("");
 
     return `
-      <div class="item">
-        <div class="itemTop">
+      <div class="houseSection">
+        <div class="houseHeader">
           <div>
-            <div class="itemName">${escapeHtml(it.designHouse || "Unknown")} — ${escapeHtml(it.fragranceName || it.title)}</div>
-            <div class="itemSub">${escapeHtml([it.type, it.ml ? `${it.ml} mL` : null].filter(Boolean).join(" • ") || "—")}</div>
+            <div class="houseName">${escapeHtml(house)}</div>
+            <div class="houseMeta">${escapeHtml(meta || "—")}</div>
           </div>
-          <div class="badges">
-            ${badgeForStatus(it.status)}
-            ${badges}
-            ${link}
-            ${issueLink}
+          <div class="houseActions">
+            ${toggleBtn}
           </div>
         </div>
-
-        <div class="kv">
-          <div class="box">
-            <div class="k">${isInv ? "Price Paid" : "Desired Buy"}</div>
-            <div class="v">${money(primaryMoney)}</div>
-          </div>
-
-          <div class="box">
-            <div class="k">${isInv ? "Desired Sell" : "Desired Buy"}</div>
-            <div class="v">${money(desiredMoney)}</div>
-          </div>
-
-          <div class="box">
-            <div class="k">${isInv ? "Paid $/mL" : "Desired Buy $/mL"}</div>
-            <div class="v">${money4(isInv ? it.pricePerMl : it.desiredPerMl)}</div>
-          </div>
-
-          <div class="box">
-            <div class="k">Target (10mL sample)</div>
-            <div class="v">${money2(it.sample10Price)}</div>
-          </div>
+        <div class="houseBody">
+          ${innerCards}
         </div>
       </div>
     `;
   }).join("");
 
-  return `<div class="list">${html}</div>`;
+  return `<div class="list">${sections}</div>`;
+}
+
+function renderSingleCard(it){
+  const isInv = state.activeTab === "inventory";
+  const primaryMoney = isInv ? it.pricePaid : it.desiredBuy;
+  const desiredMoney = isInv ? it.desiredSell : it.desiredBuy;
+
+  const badges = (it.labels || [])
+    .filter(l => l !== cfg.inventoryLabel && l !== cfg.shoppingLabel)
+    .slice(0, 8)
+    .map(l => badgeForLabel(l))
+    .join("");
+
+  const link = it.sourceLink
+    ? `<a class="badge" href="${escapeAttr(it.sourceLink)}" target="_blank" rel="noreferrer">Source</a>`
+    : "";
+
+  const issueLink = `<a class="badge" href="${escapeAttr(it.url)}" target="_blank" rel="noreferrer">Issue #${it.number}</a>`;
+
+  return `
+    <div class="item">
+      <div class="itemTop">
+        <div>
+          <div class="itemName">${escapeHtml(it.fragranceName || it.title)}</div>
+          <div class="itemSub">${escapeHtml([it.type, it.ml ? `${it.ml} mL` : null].filter(Boolean).join(" • ") || "—")}</div>
+        </div>
+        <div class="badges">
+          ${badgeForStatus(it.status)}
+          ${badges}
+          ${link}
+          ${issueLink}
+        </div>
+      </div>
+
+      <div class="kv">
+        <div class="box">
+          <div class="k">${isInv ? "Price Paid" : "Desired Buy"}</div>
+          <div class="v">${money(primaryMoney)}</div>
+        </div>
+
+        <div class="box">
+          <div class="k">${isInv ? "Desired Sell" : "Desired Buy"}</div>
+          <div class="v">${money(desiredMoney)}</div>
+        </div>
+
+        <div class="box">
+          <div class="k">${isInv ? "Paid $/mL" : "Desired Buy $/mL"}</div>
+          <div class="v">${money4(isInv ? it.pricePerMl : it.desiredPerMl)}</div>
+        </div>
+
+        <div class="box">
+          <div class="k">Target (10mL sample)</div>
+          <div class="v">${money2(it.sample10Price)}</div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderTable(items){
